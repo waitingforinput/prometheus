@@ -16,6 +16,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -68,9 +69,13 @@ type Queryable interface {
 type Querier interface {
 	LabelQuerier
 
+	// Closer releases the resources of the Querier.
+	io.Closer
+
 	// Select returns a set of series that matches the given label matchers.
 	// Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
 	// It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
+	// Returned iterators are invokable only during lifetime of the Querier.
 	Select(sortSeries bool, hints *SelectHints, matchers ...*labels.Matcher) SeriesSet
 }
 
@@ -85,9 +90,13 @@ type ChunkQueryable interface {
 type ChunkQuerier interface {
 	LabelQuerier
 
+	// Closer releases the resources of the ChunkQuerier.
+	io.Closer
+
 	// Select returns a set of series that matches the given label matchers.
 	// Caller can specify if it requires returned series to be sorted. Prefer not requiring sorting for better performance.
 	// It allows passing hints that can help in optimising select, but it's up to implementation how this is used if used at all.
+	// Returned iterators are invokable only during lifetime of the ChunkQuerier.
 	Select(sortSeries bool, hints *SelectHints, matchers ...*labels.Matcher) ChunkSeriesSet
 }
 
@@ -99,9 +108,6 @@ type LabelQuerier interface {
 
 	// LabelNames returns all the unique label names present in the block in sorted order.
 	LabelNames() ([]string, Warnings, error)
-
-	// Close releases the resources of the Querier.
-	Close() error
 }
 
 // SelectHints specifies hints passed for data selections.

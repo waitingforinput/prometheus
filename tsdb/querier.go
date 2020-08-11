@@ -109,6 +109,7 @@ type blockQuerier struct {
 }
 
 // NewBlockQuerier returns a querier against the block reader and requested min and max time range.
+// It's caller responsibility to close ChunkQuerier to release resources (e.g close chunk reader)
 func NewBlockQuerier(b BlockReader, mint, maxt int64) (storage.Querier, error) {
 	q, err := newBlockBaseQuerier(b, mint, maxt)
 	if err != nil {
@@ -141,6 +142,7 @@ type blockChunkQuerier struct {
 }
 
 // NewBlockChunkQuerier returns a chunk querier against the block reader and requested min and max time range.
+// It's caller responsibility to close ChunkQuerier to release resources (e.g close chunk reader)
 func NewBlockChunkQuerier(b BlockReader, mint, maxt int64) (storage.ChunkQuerier, error) {
 	q, err := newBlockBaseQuerier(b, mint, maxt)
 	if err != nil {
