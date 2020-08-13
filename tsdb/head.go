@@ -1514,6 +1514,7 @@ func (h *headChunkReader) Chunk(ref uint64) (chunkenc.Chunk, error) {
 
 	return &safeChunk{
 		Chunk:           c.chunk,
+		Clonable:        c.chunk.(chunkenc.Clonable),
 		s:               s,
 		cid:             int(cid),
 		isoState:        h.isoState,
@@ -1523,6 +1524,7 @@ func (h *headChunkReader) Chunk(ref uint64) (chunkenc.Chunk, error) {
 
 type safeChunk struct {
 	chunkenc.Chunk
+	chunkenc.Clonable
 	s               *memSeries
 	cid             int
 	isoState        *isolationState

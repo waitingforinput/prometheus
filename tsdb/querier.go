@@ -611,10 +611,16 @@ func (p *populateWithDelChunkSeriesIterator) Next() bool {
 
 	p.curr = p.currChkMeta
 	if p.currDelIter == nil {
-		return true
+		// Select ensures the return bytes data are accessible to user, so we need to copy the bytes that are mmapped at this point.
+		if c, ok := p.curr.Chunk.(chunkenc.Clonable); ok {
+			p.curr.Chunk = c.Clone()
+			return true
+		}
+		p.err = errors.Errorf("chunk of type %T does not implement chunkenc.Clonable", p.curr.Chunk)
+		return false
 	}
 
-	// Re-encode the chunk if iterator is provider. This means that it has some samples to be deleted or chunk is opened.
+	// Re-encode the chunk if iterator is provided. This means that it has some samples to be deleted or chunk is opened.
 	newChunk := chunkenc.NewXORChunk()
 	app, err := newChunk.Appender()
 	if err != nil {

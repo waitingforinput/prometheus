@@ -2819,7 +2819,7 @@ func TestOpen_VariousBlockStates(t *testing.T) {
 }
 
 // Regression test for: https://github.com/prometheus/prometheus/issues/7776
-func TestDBQueriers_BytesNotReused(t *testing.T) {
+func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "test")
 	testutil.Ok(t, err)
 
@@ -2871,6 +2871,12 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 		testutil.Assert(t, !res.Next(), "no more series expected")
 		testutil.Ok(t, res.Err())
 		testutil.Equals(t, 0, len(res.Warnings()))
+
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
+			testutil.Ok(t, err)
+			testutil.Equals(t, 400, len(smpls))
+		}))
 	})
 
 	t.Run("chunk querier select", func(t *testing.T) {
@@ -2882,6 +2888,12 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 		testutil.Assert(t, !res.Next(), "no more series expected")
 		testutil.Ok(t, res.Err())
 		testutil.Equals(t, 0, len(res.Warnings()))
+
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			chks, err = storage.ExpandChunks(chunkSeries.Iterator())
+			testutil.Ok(t, err)
+			testutil.Equals(t, 4, len(chks))
+		}))
 	})
 
 	assertAcessibleResults := func() {
@@ -2891,38 +2903,19 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 		testutil.Equals(t, defaultLabelName+"1", series.Labels()[1].Name)
 		testutil.Equals(t, defaultLabelValue+"1", series.Labels()[1].Value)
 
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
-			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
-			testutil.Ok(t, err)
-			testutil.Equals(t, 400, len(smpls))
-		}))
-
 		// Verify the chunk data is accessible.
 		testutil.Equals(t, defaultLabelName, chunkSeries.Labels()[0].Name)
 		testutil.Equals(t, "0", chunkSeries.Labels()[0].Value)
 		testutil.Equals(t, defaultLabelName+"1", chunkSeries.Labels()[1].Name)
 		testutil.Equals(t, defaultLabelValue+"1", chunkSeries.Labels()[1].Value)
 
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
-			chks, err = storage.ExpandChunks(chunkSeries.Iterator())
-			testutil.Ok(t, err)
-			testutil.Equals(t, 4, len(chks))
-		}))
-		// All chunks should be accessible for read.
+		// All chunks should be accessible for read and write (copied).
 		for _, c := range chks {
 			testutil.Ok(t, faultOrPanicToErr(t, func() {
 				_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
 			}))
-		}
-		for _, c := range chks[:2] {
-			// Chunks coming from block are mmaped, with READ access only.
-			testutil.NotOk(t, faultOrPanicToErr(t, func() {
-				c.Chunk.Bytes()[0] = 0 // Check if we can write to the byte range.
-			}))
-		}
-		for _, c := range chks[2:] {
 			testutil.Ok(t, faultOrPanicToErr(t, func() {
-				c.Chunk.Bytes()[0] = 0 // Check if we can write to the byte range
+				c.Chunk.Bytes()[0] = 0 // Check if we can write to the byte range.
 			}))
 		}
 	}
@@ -2931,6 +2924,18 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 	t.Run("delete series and access results", func(t *testing.T) {
 		testutil.Ok(t, db.Delete(0, 200, labels.MustNewMatcher(labels.MatchRegexp, defaultLabelName, ".*")))
 		assertAcessibleResults()
+
+		// Iterating should still work as well.
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
+			testutil.Ok(t, err)
+			testutil.Equals(t, 400, len(smpls))
+		}))
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			chks, err := storage.ExpandChunks(chunkSeries.Iterator())
+			testutil.Ok(t, err)
+			testutil.Equals(t, 4, len(chks))
+		}))
 	})
 
 	done := make(chan struct{})
@@ -2944,6 +2949,17 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 			close(done)
 		}()
 		assertAcessibleResults()
+		// Iterating should still work as well.
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
+			testutil.Ok(t, err)
+			testutil.Equals(t, 400, len(smpls))
+		}))
+		testutil.Ok(t, faultOrPanicToErr(t, func() {
+			chks, err := storage.ExpandChunks(chunkSeries.Iterator())
+			testutil.Ok(t, err)
+			testutil.Equals(t, 4, len(chks))
+		}))
 	})
 	select {
 	case _, ok := <-done:
@@ -2963,77 +2979,41 @@ func TestDBQueriers_BytesNotReused(t *testing.T) {
 	testutil.Ok(t, cq.Close())
 	<-done
 
-	// After queriers close, accessing bytes and iterator data should cause SEGFAULT.
-	testutil.Equals(t, defaultLabelName, series.Labels()[0].Name)
-	testutil.Equals(t, "0", series.Labels()[0].Value)
-	testutil.Equals(t, defaultLabelName+"1", series.Labels()[1].Name)
-	testutil.Equals(t, defaultLabelValue+"1", series.Labels()[1].Value)
+	// After queriers close, accessing bytes should be still fine.
+	assertAcessibleResults()
 
+	// Using iterators should cause SEGFAULT.
 	testutil.NotOk(t, faultOrPanicToErr(t, func() {
 		smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 		testutil.Ok(t, err)
 		testutil.Equals(t, 400, len(smpls))
 	}))
-
-	testutil.Equals(t, defaultLabelName, chunkSeries.Labels()[0].Name)
-	testutil.Equals(t, "0", chunkSeries.Labels()[0].Value)
-	testutil.Equals(t, defaultLabelName+"1", chunkSeries.Labels()[1].Name)
-	testutil.Equals(t, defaultLabelValue+"1", chunkSeries.Labels()[1].Value)
-
 	testutil.NotOk(t, faultOrPanicToErr(t, func() {
-		chks, err = storage.ExpandChunks(chunkSeries.Iterator())
+		chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 		testutil.Ok(t, err)
 		testutil.Equals(t, 4, len(chks))
 	}))
-	for _, c := range chks[:2] {
-		testutil.NotOk(t, faultOrPanicToErr(t, func() {
-			_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
-		}))
-	}
-	for _, c := range chks[2:] {
-		// You can access chunks from head, even after closed queriers and removed data.
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
-			_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
-		}))
-	}
 
+	// Same after closing the DB.
 	testutil.Ok(t, db.reload())
 	testutil.Ok(t, db.Close())
 	db = nil
 
-	// After queriers close, accessing bytes and iterator data should cause SEGFAULT.
-	testutil.Equals(t, defaultLabelName, series.Labels()[0].Name)
-	testutil.Equals(t, "0", series.Labels()[0].Value)
-	testutil.Equals(t, defaultLabelName+"1", series.Labels()[1].Name)
-	testutil.Equals(t, defaultLabelValue+"1", series.Labels()[1].Value)
+	// After queriers close, accessing bytes should be still fine.
+	assertAcessibleResults()
 
+	// Using iterators should cause SEGFAULT.
 	testutil.NotOk(t, faultOrPanicToErr(t, func() {
 		smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 		testutil.Ok(t, err)
 		testutil.Equals(t, 400, len(smpls))
 	}))
-
-	testutil.Equals(t, defaultLabelName, chunkSeries.Labels()[0].Name)
-	testutil.Equals(t, "0", chunkSeries.Labels()[0].Value)
-	testutil.Equals(t, defaultLabelName+"1", chunkSeries.Labels()[1].Name)
-	testutil.Equals(t, defaultLabelValue+"1", chunkSeries.Labels()[1].Value)
-
 	testutil.NotOk(t, faultOrPanicToErr(t, func() {
-		chks, err = storage.ExpandChunks(chunkSeries.Iterator())
+		chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 		testutil.Ok(t, err)
 		testutil.Equals(t, 4, len(chks))
 	}))
-	for _, c := range chks[:2] {
-		testutil.NotOk(t, faultOrPanicToErr(t, func() {
-			_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
-		}))
-	}
-	for _, c := range chks[2:] {
-		// You can access chunks from head, even after closed queriers and removed data.
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
-			_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
-		}))
-	}
+
 }
 
 func faultOrPanicToErr(t testing.TB, f func()) (err error) {
