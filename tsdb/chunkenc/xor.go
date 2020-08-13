@@ -90,7 +90,7 @@ func (c *XORChunk) Compact() {
 func (c *XORChunk) Clone() Chunk {
 	buf := make([]byte, len(c.b.stream))
 	copy(buf, c.b.stream)
-	return &XORChunk{b: bstream{stream: buf, count: 0}}
+	return &XORChunk{b: bstream{stream: buf, count: c.b.count}}
 }
 
 // Appender implements the Chunk interface.

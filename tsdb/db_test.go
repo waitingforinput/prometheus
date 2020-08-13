@@ -3013,7 +3013,6 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 		testutil.Ok(t, err)
 		testutil.Equals(t, 4, len(chks))
 	}))
-
 }
 
 func faultOrPanicToErr(t testing.TB, f func()) (err error) {
