@@ -2822,6 +2822,9 @@ func TestOpen_VariousBlockStates(t *testing.T) {
 func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "test")
 	testutil.Ok(t, err)
+	t.Cleanup(func() {
+		testutil.Ok(t, os.RemoveAll(tmpdir))
+	})
 
 	// Generate one series in two parts. Put first part in block, second in head.
 	createBlock(t, tmpdir, genSeries(1, 2, 0, 200))
@@ -2849,7 +2852,6 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 			testutil.Ok(t, db.reload())
 			testutil.Ok(t, db.Close())
 		}
-		testutil.Ok(t, os.RemoveAll(tmpdir))
 	})
 
 	app := db.Appender(context.Background())
@@ -2872,7 +2874,7 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 		testutil.Ok(t, res.Err())
 		testutil.Equals(t, 0, len(res.Warnings()))
 
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 			testutil.Ok(t, err)
 			testutil.Equals(t, 400, len(smpls))
@@ -2889,7 +2891,7 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 		testutil.Ok(t, res.Err())
 		testutil.Equals(t, 0, len(res.Warnings()))
 
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			chks, err = storage.ExpandChunks(chunkSeries.Iterator())
 			testutil.Ok(t, err)
 			testutil.Equals(t, 4, len(chks))
@@ -2911,10 +2913,10 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 
 		// All chunks should be accessible for read and write (copied).
 		for _, c := range chks {
-			testutil.Ok(t, faultOrPanicToErr(t, func() {
+			testutil.Ok(t, faultOrPanicToErr(func() {
 				_ = string(c.Chunk.Bytes()) // Access bytes by converting them to different type.
 			}))
-			testutil.Ok(t, faultOrPanicToErr(t, func() {
+			testutil.Ok(t, faultOrPanicToErr(func() {
 				c.Chunk.Bytes()[0] = 0 // Check if we can write to the byte range.
 			}))
 		}
@@ -2926,12 +2928,12 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 		assertAcessibleResults()
 
 		// Iterating should still work as well.
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 			testutil.Ok(t, err)
 			testutil.Equals(t, 400, len(smpls))
 		}))
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 			testutil.Ok(t, err)
 			testutil.Equals(t, 4, len(chks))
@@ -2950,12 +2952,12 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 		}()
 		assertAcessibleResults()
 		// Iterating should still work as well.
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 			testutil.Ok(t, err)
 			testutil.Equals(t, 400, len(smpls))
 		}))
-		testutil.Ok(t, faultOrPanicToErr(t, func() {
+		testutil.Ok(t, faultOrPanicToErr(func() {
 			chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 			testutil.Ok(t, err)
 			testutil.Equals(t, 4, len(chks))
@@ -2983,12 +2985,12 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 	assertAcessibleResults()
 
 	// Using iterators should cause SEGFAULT.
-	testutil.NotOk(t, faultOrPanicToErr(t, func() {
+	testutil.NotOk(t, faultOrPanicToErr(func() {
 		smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 		testutil.Ok(t, err)
 		testutil.Equals(t, 400, len(smpls))
 	}))
-	testutil.NotOk(t, faultOrPanicToErr(t, func() {
+	testutil.NotOk(t, faultOrPanicToErr(func() {
 		chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 		testutil.Ok(t, err)
 		testutil.Equals(t, 4, len(chks))
@@ -3003,21 +3005,19 @@ func TestDBQueriers_ChunkBytesAreCopied(t *testing.T) {
 	assertAcessibleResults()
 
 	// Using iterators should cause SEGFAULT.
-	testutil.NotOk(t, faultOrPanicToErr(t, func() {
+	testutil.NotOk(t, faultOrPanicToErr(func() {
 		smpls, err := storage.ExpandSamples(series.Iterator(), newSample)
 		testutil.Ok(t, err)
 		testutil.Equals(t, 400, len(smpls))
 	}))
-	testutil.NotOk(t, faultOrPanicToErr(t, func() {
+	testutil.NotOk(t, faultOrPanicToErr(func() {
 		chks, err := storage.ExpandChunks(chunkSeries.Iterator())
 		testutil.Ok(t, err)
 		testutil.Equals(t, 4, len(chks))
 	}))
 }
 
-func faultOrPanicToErr(t testing.TB, f func()) (err error) {
-	t.Helper()
-
+func faultOrPanicToErr(f func()) (err error) {
 	// Set this go routine to panic on segfault to allow asserting on those.
 	debug.SetPanicOnFault(true)
 	defer func() {
@@ -3028,6 +3028,5 @@ func faultOrPanicToErr(t testing.TB, f func()) (err error) {
 	}()
 
 	f()
-
 	return err
 }
